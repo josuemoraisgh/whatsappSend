@@ -198,35 +198,26 @@ class _ActionPanel extends StatelessWidget {
               padding: const EdgeInsets.only(bottom: 8),
               child: Row(
                 children: [
-                  const Text(
-                    'Modo de envio:',
-                    style: TextStyle(
-                      fontSize: 12,
-                      fontWeight: FontWeight.w600,
-                      color: Color(0xFF555555),
-                    ),
-                  ),
-                  const SizedBox(width: 10),
                   _ModeChip(
-                    label: 'Automático (WhatsApp Web)',
+                    label: 'WhatsApp Web',
                     icon: Icons.smart_toy_outlined,
                     selected: send.sendMode == SendMode.webView,
                     onTap: send.isSending
                         ? null
                         : () => context
-                              .read<SendProvider>()
-                              .switchMode(SendMode.webView),
+                            .read<SendProvider>()
+                            .switchMode(SendMode.webView),
                   ),
                   const SizedBox(width: 8),
                   _ModeChip(
-                    label: 'Manual (App nativo)',
+                    label: 'App nativo',
                     icon: Icons.touch_app_outlined,
                     selected: send.sendMode == SendMode.native,
                     onTap: send.isSending
                         ? null
                         : () => context
-                              .read<SendProvider>()
-                              .switchMode(SendMode.native),
+                            .read<SendProvider>()
+                            .switchMode(SendMode.native),
                   ),
                 ],
               ),
@@ -246,8 +237,8 @@ class _ActionPanel extends StatelessWidget {
                   child: Text(
                     send.canSwitchMode
                         ? 'Vincule o WhatsApp Web uma vez '
-                          '(use "Vincular com número de telefone" em vez de QR). '
-                          'Depois, o envio é totalmente automático.'
+                            '(use "Vincular com número de telefone" em vez de QR). '
+                            'Depois, o envio é totalmente automático.'
                         : 'Use Ctrl+Clique nos contatos para seleção múltipla.',
                     style: const TextStyle(
                       fontSize: 11,
@@ -411,45 +402,45 @@ class _WebViewPanel extends StatelessWidget {
       visible: send.showWebView,
       maintainState: true,
       child: Stack(
-          children: [
-            ctrl.buildWidget(),
-            if (send.loginRequired && !send.loggedIn)
-              Positioned(
-                top: 8,
-                left: 8,
-                right: 8,
-                child: Container(
-                  padding: const EdgeInsets.symmetric(
-                    horizontal: 14,
-                    vertical: 8,
-                  ),
-                  decoration: BoxDecoration(
-                    color: AppColors.waDarkGreen.withValues(alpha: 0.88),
-                    borderRadius: BorderRadius.circular(8),
-                  ),
-                  child: const Row(
-                    children: [
-                      Icon(
-                        Icons.qr_code_scanner,
-                        color: AppColors.white,
-                        size: 20,
-                      ),
-                      SizedBox(width: 10),
-                      Expanded(
-                        child: Text(
-                          'Escaneie o QR code com o WhatsApp do seu celular para conectar.',
-                          style: TextStyle(
-                            color: AppColors.white,
-                            fontSize: 13,
-                          ),
+        children: [
+          ctrl.buildWidget(),
+          if (send.loginRequired && !send.loggedIn)
+            Positioned(
+              top: 8,
+              left: 8,
+              right: 8,
+              child: Container(
+                padding: const EdgeInsets.symmetric(
+                  horizontal: 14,
+                  vertical: 8,
+                ),
+                decoration: BoxDecoration(
+                  color: AppColors.waDarkGreen.withValues(alpha: 0.88),
+                  borderRadius: BorderRadius.circular(8),
+                ),
+                child: const Row(
+                  children: [
+                    Icon(
+                      Icons.qr_code_scanner,
+                      color: AppColors.white,
+                      size: 20,
+                    ),
+                    SizedBox(width: 10),
+                    Expanded(
+                      child: Text(
+                        'Escaneie o QR code com o WhatsApp do seu celular para conectar.',
+                        style: TextStyle(
+                          color: AppColors.white,
+                          fontSize: 13,
                         ),
                       ),
-                    ],
-                  ),
+                    ),
+                  ],
                 ),
               ),
-          ],
-        ),
+            ),
+        ],
+      ),
     );
 
     if (expanded) {

@@ -81,79 +81,85 @@ class _ContactsTable extends StatelessWidget {
                 ),
                 child: SingleChildScrollView(
                   child: DataTable(
-            headingRowColor: WidgetStateProperty.all(AppColors.waDarkGreen),
-            headingTextStyle: const TextStyle(
-              color: AppColors.white,
-              fontWeight: FontWeight.bold,
-              fontSize: 12,
-            ),
-            dataRowMinHeight: 36,
-            dataRowMaxHeight: 44,
-            showCheckboxColumn: true,
-            border: const TableBorder(
-              horizontalInside: BorderSide(
-                color: Color(0xFFEEEEEE),
-                width: 1,
-              ),
-            ),
-            columns: const [
-              DataColumn(label: Text('Nome')),
-              DataColumn(label: Text('Telefone')),
-              DataColumn(label: Text('Mensagem Individual')),
-              DataColumn(label: Text('Status')),
-              DataColumn(label: Text('Ações')),
-            ],
-            rows: contacts.asMap().entries.map((entry) {
-              final c = entry.value;
-              final isSelected = prov.selectedIds.contains(c.id);
-              final bg = _rowColor(c.status);
-
-              return DataRow(
-                selected: isSelected,
-                color: WidgetStateProperty.resolveWith((_) => bg),
-                onSelectChanged: (_) =>
-                    context.read<ContactsProvider>().toggleSelection(c.id),
-                cells: [
-                  DataCell(Text(c.name, style: const TextStyle(fontSize: 12))),
-                  DataCell(Text(c.phone, style: const TextStyle(fontSize: 12))),
-                  DataCell(
-                    Text(
-                      c.individualMessage.isEmpty ? '—' : c.individualMessage,
-                      overflow: TextOverflow.ellipsis,
-                      style: TextStyle(
-                        fontSize: 12,
-                        color: c.individualMessage.isEmpty
-                            ? const Color(0xFFAAAAAA)
-                            : null,
+                    headingRowColor:
+                        WidgetStateProperty.all(AppColors.waDarkGreen),
+                    headingTextStyle: const TextStyle(
+                      color: AppColors.white,
+                      fontWeight: FontWeight.bold,
+                      fontSize: 12,
+                    ),
+                    dataRowMinHeight: 36,
+                    dataRowMaxHeight: 44,
+                    showCheckboxColumn: true,
+                    border: const TableBorder(
+                      horizontalInside: BorderSide(
+                        color: Color(0xFFEEEEEE),
+                        width: 1,
                       ),
                     ),
+                    columns: const [
+                      DataColumn(label: Text('Nome')),
+                      DataColumn(label: Text('Telefone')),
+                      DataColumn(label: Text('Mensagem Individual')),
+                      DataColumn(label: Text('Status')),
+                      DataColumn(label: Text('Ações')),
+                    ],
+                    rows: contacts.asMap().entries.map((entry) {
+                      final c = entry.value;
+                      final isSelected = prov.selectedIds.contains(c.id);
+                      final bg = _rowColor(c.status);
+
+                      return DataRow(
+                        selected: isSelected,
+                        color: WidgetStateProperty.resolveWith((_) => bg),
+                        onSelectChanged: (_) => context
+                            .read<ContactsProvider>()
+                            .toggleSelection(c.id),
+                        cells: [
+                          DataCell(Text(c.name,
+                              style: const TextStyle(fontSize: 12))),
+                          DataCell(Text(c.phone,
+                              style: const TextStyle(fontSize: 12))),
+                          DataCell(
+                            Text(
+                              c.individualMessage.isEmpty
+                                  ? '—'
+                                  : c.individualMessage,
+                              overflow: TextOverflow.ellipsis,
+                              style: TextStyle(
+                                fontSize: 12,
+                                color: c.individualMessage.isEmpty
+                                    ? const Color(0xFFAAAAAA)
+                                    : null,
+                              ),
+                            ),
+                          ),
+                          DataCell(StatusBadge(c.status)),
+                          DataCell(
+                            Row(
+                              mainAxisSize: MainAxisSize.min,
+                              children: [
+                                _IconBtn(
+                                  icon: Icons.edit_outlined,
+                                  color: AppColors.blue,
+                                  tooltip: 'Editar',
+                                  onTap: () => _editContact(context, c),
+                                ),
+                                const SizedBox(width: 4),
+                                _IconBtn(
+                                  icon: Icons.delete_outline,
+                                  color: AppColors.red,
+                                  tooltip: 'Remover',
+                                  onTap: () => _removeContact(context, c),
+                                ),
+                              ],
+                            ),
+                          ),
+                        ],
+                      );
+                    }).toList(),
                   ),
-                  DataCell(StatusBadge(c.status)),
-                  DataCell(
-                    Row(
-                      mainAxisSize: MainAxisSize.min,
-                      children: [
-                        _IconBtn(
-                          icon: Icons.edit_outlined,
-                          color: AppColors.blue,
-                          tooltip: 'Editar',
-                          onTap: () => _editContact(context, c),
-                        ),
-                        const SizedBox(width: 4),
-                        _IconBtn(
-                          icon: Icons.delete_outline,
-                          color: AppColors.red,
-                          tooltip: 'Remover',
-                          onTap: () => _removeContact(context, c),
-                        ),
-                      ],
-                    ),
-                  ),
-                ],
-              );
-            }).toList(),
-          ),
-        ),
+                ),
               ),
             );
           },
@@ -226,7 +232,7 @@ class _ActionBar extends StatelessWidget {
             disabled: prov.selectedCount == 0,
           ),
           AppButton(
-            label: 'Selecionar todos',
+            label: 'Select All',
             onPressed: () => context.read<ContactsProvider>().selectAll(),
             color: AppColors.neutralBtn,
             hoverColor: AppColors.neutralBtnHover,
@@ -236,7 +242,7 @@ class _ActionBar extends StatelessWidget {
             radius: 17,
           ),
           AppButton(
-            label: 'Desselecionar',
+            label: 'Deselect All',
             onPressed: () => context.read<ContactsProvider>().clearSelection(),
             color: AppColors.neutralBtn,
             hoverColor: AppColors.neutralBtnHover,
@@ -246,7 +252,7 @@ class _ActionBar extends StatelessWidget {
             radius: 17,
           ),
           AppButton(
-            label: 'Importar JSON',
+            label: 'Import JSON',
             onPressed: sending ? null : () => _importJson(context),
             color: AppColors.neutralBtn,
             hoverColor: AppColors.neutralBtnHover,
@@ -257,7 +263,7 @@ class _ActionBar extends StatelessWidget {
             radius: 17,
           ),
           AppButton(
-            label: 'Exportar JSON',
+            label: 'Export JSON',
             onPressed: () => _exportJson(context),
             color: AppColors.neutralBtn,
             hoverColor: AppColors.neutralBtnHover,
@@ -268,7 +274,7 @@ class _ActionBar extends StatelessWidget {
             radius: 17,
           ),
           AppButton(
-            label: 'Limpar tudo',
+            label: 'Clear All',
             onPressed:
                 (sending || prov.total == 0) ? null : () => _clearAll(context),
             color: const Color(0xFF9E9E9E),
