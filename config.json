@@ -1,0 +1,8 @@
+{
+    "mensagem_padrao": "Olá {nome}! Esta é uma mensagem automática.",
+    "perfil_chrome": "C:\\Users\\admin\\whatsapp_chrome_profile",
+    "intervalo_min": 6,
+    "intervalo_max": 14,
+    "chromedriver_caminho": "",
+    "timeout_pagina": 40
+}

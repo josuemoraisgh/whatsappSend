@@ -1,0 +1,17 @@
+[
+    {
+        "nome": "João Silva",
+        "telefone": "5534991110001",
+        "mensagem": ""
+    },
+    {
+        "nome": "Maria Souza",
+        "telefone": "5534991110002",
+        "mensagem": "Olá {nome}, tudo bem? Mensagem personalizada aqui!"
+    },
+    {
+        "nome": "Carlos Oliveira",
+        "telefone": "(34) 9 9111-0003",
+        "mensagem": ""
+    }
+]
