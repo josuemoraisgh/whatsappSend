@@ -366,23 +366,70 @@ final class WebViewWhatsAppService implements WhatsAppSenderService {
         textOk = await _injectText(ctrl, message, debug: debug);
         if (textOk) break;
       }
+
+      // ── Guard final: usa &text= na URL para o WhatsApp preencher ──
       if (!textOk) {
-        log('FALHA: nenhum método de injeção funcionou após 3 tentativas');
+        log('Injeção JS falhou — guard via &text= na URL');
+        final encodedMsg = Uri.encodeComponent(message);
+        await ctrl.executeJavaScript(
+          'window.location.href = ${jsonEncode('https://web.whatsapp.com/send?phone=$tel&text=')}+"$encodedMsg";',
+        );
+        // Aguarda a página carregar com o texto pré-preenchido
+        final guardReady = await _waitForMsgBoxOrError(
+          ctrl,
+          Duration(seconds: timeout),
+          debug: debug,
+        );
+        if (guardReady == _NavResult.ok) {
+          log('Guard &text=: caixa pronta com texto pré-preenchido');
+          textOk = true;
+        } else {
+          log('Guard &text=: falhou (msgBox status=$guardReady)');
+        }
+      }
+
+      if (!textOk) {
+        log('FALHA: nenhum método de injeção funcionou (incluindo guard &text=)');
         return false;
       }
 
       await Future.delayed(const Duration(milliseconds: 150));
 
-      // 4. Envia a mensagem (botão enviar → fallback Enter)
+      // 4. Envia a mensagem (botão enviar → fallback Enter → guard &text=+Enter)
       final sent = await _clickSendButton(ctrl, debug: debug);
-      if (!sent) {
-        log('FALHA: nenhum método de envio funcionou');
-        return false;
+      if (sent) {
+        log('Mensagem enviada ✓');
+        await Future.delayed(const Duration(milliseconds: 400));
+        return true;
       }
 
-      log('Mensagem enviada ✓');
-      await Future.delayed(const Duration(milliseconds: 400));
-      return true;
+      // ── Guard final do ENVIAR: recarrega com &text= e usa Enter ──
+      log('Guard enviar: recarregando com &text= para tentar Enter');
+      final encodedMsg = Uri.encodeComponent(message);
+      await ctrl.executeJavaScript(
+        'window.location.href = ${jsonEncode('https://web.whatsapp.com/send?phone=$tel&text=')}+"$encodedMsg";',
+      );
+      final guardReady = await _waitForMsgBoxOrError(
+        ctrl,
+        Duration(seconds: timeout),
+        debug: debug,
+      );
+      if (guardReady != _NavResult.ok) {
+        log('Guard enviar: timeout aguardando caixa');
+        return false;
+      }
+      await Future.delayed(const Duration(milliseconds: 800));
+
+      // Tenta Enter direto no activeElement (texto já está pré-preenchido pela URL)
+      final guardSent = await _guardSendViaEnter(ctrl, debug: debug);
+      if (guardSent) {
+        log('Guard enviar: mensagem enviada via Enter ✓');
+        await Future.delayed(const Duration(milliseconds: 400));
+        return true;
+      }
+
+      log('FALHA: nenhum método de envio funcionou (incluindo guard)');
+      return false;
     } catch (e) {
       log('Exceção: $e');
       return false;
@@ -696,71 +743,222 @@ final class WebViewWhatsAppService implements WhatsAppSenderService {
     return _NavResult.timeout;
   }
 
-  /// Tenta clicar no botão de enviar de múltiplas formas.
+  /// Tenta clicar no botão de enviar de múltiplas formas, com retry.
+  /// Retorna `true` somente se a caixa de mensagem ficou vazia após o envio.
   Future<bool> _clickSendButton(
     AppWebViewController ctrl, {
     List<String>? debug,
   }) async {
     void log(String s) => debug?.add(s);
 
-    // Abordagem 1: encontra o ícone de envio e clica no botão pai
-    final btnResult = await ctrl.executeJavaScript('''
-      (function() {
-        var icons = [
-          'span[data-icon="send"]',
-          '[data-testid="send"]',
-          'span[data-icon="compose-btn-send"]'
-        ];
-        for (var sel of icons) {
-          var icon = document.querySelector(sel);
-          if (icon) {
-            // Sobe na árvore DOM para achar o <button> ou [role=button]
-            var btn = icon.closest('button, [role="button"]');
-            if (btn) { btn.click(); return 'btn_click:' + sel; }
-            // Fallback: clica no próprio ícone
-            icon.click();
-            return 'icon_click:' + sel;
+    /// Verifica se a caixa de mensagem ficou vazia (= mensagem foi enviada).
+    Future<bool> verifySent() async {
+      await Future.delayed(const Duration(milliseconds: 600));
+      final check = await ctrl.executeJavaScript('''
+        (function() {
+          var sels = $_kMsgBoxSelsJs;
+          for (var s of sels) {
+            var el = document.querySelector(s);
+            if (el) {
+              var t = (el.textContent || '').trim();
+              return t.length === 0 ? 'empty' : 'has_text:' + t.length;
+            }
           }
-        }
-
-        // Tenta labels (PT/EN)
-        var labels = ['Enviar', 'Send'];
-        for (var lbl of labels) {
-          var el = document.querySelector('div[aria-label="' + lbl + '"]')
-                || document.querySelector('button[aria-label="' + lbl + '"]');
-          if (el) { el.click(); return 'label_click:' + lbl; }
-        }
-        return 'not_found';
-      })()
-    ''');
-    log('Botão enviar: $btnResult');
-
-    if (btnResult != 'not_found') {
-      await Future.delayed(const Duration(milliseconds: 400));
-      return true;
+          return 'no_box';
+        })()
+      ''');
+      log('Verificação pós-envio: $check');
+      // Se a caixa está vazia ou desapareceu, a mensagem foi enviada
+      return check == 'empty' || check == 'no_box';
     }
 
-    // Abordagem 2: tecla Enter no campo de texto
-    log('Tentando Enter no campo de texto');
-    final enterOk = await ctrl.executeJavaScript('''
+    for (int attempt = 1; attempt <= 3; attempt++) {
+      if (attempt > 1) {
+        log('Retry enviar #$attempt — aguardando 500ms…');
+        await Future.delayed(const Duration(milliseconds: 500));
+      }
+
+      // Abordagem 1: encontra o ícone de envio e clica no botão pai
+      final btnResult = await ctrl.executeJavaScript('''
+        (function() {
+          var icons = [
+            'span[data-icon="send"]',
+            '[data-testid="send"]',
+            'span[data-icon="compose-btn-send"]',
+            'span[data-icon="send-filled"]',
+            'span[data-icon="wds-ic-send-filled"]'
+          ];
+          for (var sel of icons) {
+            var icon = document.querySelector(sel);
+            if (icon) {
+              var btn = icon.closest('button, [role="button"]');
+              if (btn) { btn.click(); return 'btn_click:' + sel; }
+              icon.click();
+              return 'icon_click:' + sel;
+            }
+          }
+
+          // Tenta labels (PT/EN/ES)
+          var labels = ['Enviar', 'Send', 'Enviar mensaje'];
+          for (var lbl of labels) {
+            var el = document.querySelector('button[aria-label="' + lbl + '"]')
+                  || document.querySelector('div[aria-label="' + lbl + '"]')
+                  || document.querySelector('[role="button"][aria-label="' + lbl + '"]');
+            if (el) { el.click(); return 'label_click:' + lbl; }
+          }
+
+          // Fallback: qualquer botão dentro do footer com ícone SVG
+          var footer = document.querySelector('footer');
+          if (footer) {
+            var btns = footer.querySelectorAll('button, [role="button"]');
+            for (var b of btns) {
+              if (b.querySelector('svg') || b.querySelector('span[data-icon]')) {
+                b.click();
+                return 'footer_btn_fallback';
+              }
+            }
+          }
+          return 'not_found';
+        })()
+      ''');
+      log('Botão enviar: $btnResult');
+
+      if (btnResult != 'not_found') {
+        if (await verifySent()) return true;
+        log('Clique não enviou (caixa ainda tem texto)');
+        // Continua para Enter
+      }
+
+      // Abordagem 2: tecla Enter com sequência completa (keydown+keypress+keyup)
+      log('Tentando Enter no campo de texto');
+      final enterOk = await ctrl.executeJavaScript('''
+        (function() {
+          var sels = $_kMsgBoxSelsJs;
+          for (var s of sels) {
+            var el = document.querySelector(s);
+            if (el) {
+              el.focus();
+              var opts = {key:'Enter', code:'Enter', keyCode:13, which:13, bubbles:true};
+              el.dispatchEvent(new KeyboardEvent('keydown', opts));
+              el.dispatchEvent(new KeyboardEvent('keypress', opts));
+              el.dispatchEvent(new KeyboardEvent('keyup', opts));
+              return 'enter_ok';
+            }
+          }
+          return 'no_box';
+        })()
+      ''');
+      log('Resultado Enter: $enterOk');
+
+      if (enterOk == 'enter_ok') {
+        if (await verifySent()) return true;
+        log('Enter não enviou (caixa ainda tem texto)');
+      }
+    }
+
+    return false;
+  }
+
+  /// Guard final: envia via Enter no activeElement + fallbacks robustos.
+  /// Pré-condição: a URL foi carregada com &text= (texto pré-preenchido).
+  Future<bool> _guardSendViaEnter(
+    AppWebViewController ctrl, {
+    List<String>? debug,
+  }) async {
+    void log(String s) => debug?.add(s);
+
+    // 1. Foca na caixa de msgs e dispara Enter completo
+    log('Guard: Enter no msg box');
+    final r1 = await ctrl.executeJavaScript('''
       (function() {
         var sels = $_kMsgBoxSelsJs;
         for (var s of sels) {
           var el = document.querySelector(s);
           if (el) {
             el.focus();
-            var opts = {key:'Enter', code:'Enter', keyCode:13, which:13, bubbles:true};
+            var opts = {key:'Enter', code:'Enter', keyCode:13, which:13, bubbles:true, cancelable:true};
             el.dispatchEvent(new KeyboardEvent('keydown', opts));
-            return 'enter_ok';
+            el.dispatchEvent(new KeyboardEvent('keypress', opts));
+            el.dispatchEvent(new KeyboardEvent('keyup', opts));
+            return 'enter_sent:' + s;
           }
         }
         return 'no_box';
       })()
     ''');
-    log('Resultado Enter: $enterOk');
+    log('Guard Enter result: $r1');
+    await Future.delayed(const Duration(milliseconds: 600));
 
-    if (enterOk == 'enter_ok') {
-      await Future.delayed(const Duration(milliseconds: 400));
+    // Verifica se enviou
+    final check1 = await ctrl.executeJavaScript('''
+      (function() {
+        var sels = $_kMsgBoxSelsJs;
+        for (var s of sels) {
+          var el = document.querySelector(s);
+          if (el) return (el.textContent || '').trim().length === 0 ? 'empty' : 'has_text';
+        }
+        return 'no_box';
+      })()
+    ''');
+    if (check1 == 'empty' || check1 == 'no_box') return true;
+
+    // 2. Tenta Enter no document.activeElement
+    log('Guard: Enter no activeElement');
+    await ctrl.executeJavaScript('''
+      (function() {
+        var el = document.activeElement;
+        if (el) {
+          var opts = {key:'Enter', code:'Enter', keyCode:13, which:13, bubbles:true, cancelable:true};
+          el.dispatchEvent(new KeyboardEvent('keydown', opts));
+          el.dispatchEvent(new KeyboardEvent('keypress', opts));
+          el.dispatchEvent(new KeyboardEvent('keyup', opts));
+        }
+      })()
+    ''');
+    await Future.delayed(const Duration(milliseconds: 600));
+
+    final check2 = await ctrl.executeJavaScript('''
+      (function() {
+        var sels = $_kMsgBoxSelsJs;
+        for (var s of sels) {
+          var el = document.querySelector(s);
+          if (el) return (el.textContent || '').trim().length === 0 ? 'empty' : 'has_text';
+        }
+        return 'no_box';
+      })()
+    ''');
+    if (check2 == 'empty' || check2 == 'no_box') return true;
+
+    // 3. Último recurso: clica em qualquer botão com ícone send visível no DOM inteiro
+    log('Guard: busca global por botão send');
+    final r3 = await ctrl.executeJavaScript('''
+      (function() {
+        var all = document.querySelectorAll('span[data-icon]');
+        for (var sp of all) {
+          var icon = sp.getAttribute('data-icon') || '';
+          if (icon.includes('send')) {
+            var btn = sp.closest('button, [role="button"]');
+            if (btn) { btn.click(); return 'global_btn:' + icon; }
+            sp.click();
+            return 'global_icon:' + icon;
+          }
+        }
+        // Tenta botão pelo aria-label
+        var btns = document.querySelectorAll('button[aria-label], [role="button"][aria-label]');
+        for (var b of btns) {
+          var lbl = (b.getAttribute('aria-label') || '').toLowerCase();
+          if (lbl === 'enviar' || lbl === 'send') {
+            b.click();
+            return 'global_label:' + lbl;
+          }
+        }
+        return 'not_found';
+      })()
+    ''');
+    log('Guard global send: $r3');
+
+    if (r3 != 'not_found') {
+      await Future.delayed(const Duration(milliseconds: 600));
       return true;
     }
 
