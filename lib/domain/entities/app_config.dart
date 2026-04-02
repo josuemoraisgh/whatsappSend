@@ -2,8 +2,8 @@
 class AppConfig {
   const AppConfig({
     this.defaultMessage = 'Olá {nome}!',
-    this.intervalMin = 6,
-    this.intervalMax = 14,
+    this.intervalMin = 3,
+    this.intervalMax = 6,
     this.pageTimeout = 40,
   });
 
@@ -17,24 +17,25 @@ class AppConfig {
     int? intervalMin,
     int? intervalMax,
     int? pageTimeout,
-  }) => AppConfig(
-    defaultMessage: defaultMessage ?? this.defaultMessage,
-    intervalMin: intervalMin ?? this.intervalMin,
-    intervalMax: intervalMax ?? this.intervalMax,
-    pageTimeout: pageTimeout ?? this.pageTimeout,
-  );
+  }) =>
+      AppConfig(
+        defaultMessage: defaultMessage ?? this.defaultMessage,
+        intervalMin: intervalMin ?? this.intervalMin,
+        intervalMax: intervalMax ?? this.intervalMax,
+        pageTimeout: pageTimeout ?? this.pageTimeout,
+      );
 
   factory AppConfig.fromJson(Map<String, dynamic> json) => AppConfig(
-    defaultMessage: (json['mensagem_padrao'] as String?) ?? 'Olá {nome}!',
-    intervalMin: (json['intervalo_min'] as num?)?.toInt() ?? 6,
-    intervalMax: (json['intervalo_max'] as num?)?.toInt() ?? 14,
-    pageTimeout: (json['timeout_pagina'] as num?)?.toInt() ?? 40,
-  );
+        defaultMessage: (json['mensagem_padrao'] as String?) ?? 'Olá {nome}!',
+        intervalMin: (json['intervalo_min'] as num?)?.toInt() ?? 3,
+        intervalMax: (json['intervalo_max'] as num?)?.toInt() ?? 6,
+        pageTimeout: (json['timeout_pagina'] as num?)?.toInt() ?? 40,
+      );
 
   Map<String, dynamic> toJson() => {
-    'mensagem_padrao': defaultMessage,
-    'intervalo_min': intervalMin,
-    'intervalo_max': intervalMax,
-    'timeout_pagina': pageTimeout,
-  };
+        'mensagem_padrao': defaultMessage,
+        'intervalo_min': intervalMin,
+        'intervalo_max': intervalMax,
+        'timeout_pagina': pageTimeout,
+      };
 }

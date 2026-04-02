@@ -156,29 +156,35 @@ class _FileRow extends StatelessWidget {
 
           // Campo de texto
           Expanded(
-            child: TextFormField(
-              initialValue: path,
-              readOnly: true,
-              decoration: InputDecoration(
-                hintText: 'Nenhum arquivo selecionado',
-                hintStyle: const TextStyle(
-                  color: Color(0xFFAAAAAA),
-                  fontSize: 12,
+            child: Tooltip(
+              message: path.isNotEmpty ? path : '',
+              waitDuration: const Duration(milliseconds: 400),
+              child: TextFormField(
+                key: ValueKey('attach_${index}_$path'),
+                initialValue:
+                    path.isNotEmpty ? path.split(RegExp(r'[/\\]')).last : '',
+                readOnly: true,
+                decoration: InputDecoration(
+                  hintText: 'Nenhum arquivo selecionado',
+                  hintStyle: const TextStyle(
+                    color: Color(0xFFAAAAAA),
+                    fontSize: 12,
+                  ),
+                  suffixIcon: path.isNotEmpty
+                      ? IconButton(
+                          icon: const Icon(
+                            Icons.clear,
+                            size: 16,
+                            color: Color(0xFF999999),
+                          ),
+                          onPressed: () => context
+                              .read<ConfigProvider>()
+                              .setAttachment(index, ''),
+                        )
+                      : null,
                 ),
-                suffixIcon: path.isNotEmpty
-                    ? IconButton(
-                        icon: const Icon(
-                          Icons.clear,
-                          size: 16,
-                          color: Color(0xFF999999),
-                        ),
-                        onPressed: () => context
-                            .read<ConfigProvider>()
-                            .setAttachment(index, ''),
-                      )
-                    : null,
+                style: const TextStyle(fontSize: 12),
               ),
-              style: const TextStyle(fontSize: 12),
             ),
           ),
           const SizedBox(width: 8),

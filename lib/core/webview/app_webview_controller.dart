@@ -14,6 +14,10 @@ abstract class AppWebViewController {
   /// Executa JavaScript e retorna o resultado como String.
   Future<String> executeJavaScript(String script);
 
+  /// Limpa toda a sessão (cookies, localStorage, cache).
+  /// Usado para desconectar do WhatsApp Web.
+  Future<void> clearSession();
+
   /// Constrói o widget de WebView para a plataforma corrente.
   Widget buildWidget();
 

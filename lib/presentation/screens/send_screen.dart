@@ -37,18 +37,15 @@ class SendScreen extends StatelessWidget {
             final isWide = constraints.maxWidth >= 720;
 
             if (isWide && hasWebView) {
-              // Desktop: WebView e Log lado a lado
+              // Desktop: WebView e Log lado a lado com divisor arrastável
               return Column(
                 children: [
                   _ActionPanel(send),
                   const Divider(height: 1),
                   Expanded(
-                    child: Row(
-                      children: [
-                        Expanded(child: _WebViewPanel(send, expanded: true)),
-                        const VerticalDivider(width: 1),
-                        Expanded(child: _LogPanel(send)),
-                      ],
+                    child: _ResizableRow(
+                      left: _WebViewPanel(send, expanded: true),
+                      right: _LogPanel(send),
                     ),
                   ),
                 ],
@@ -223,6 +220,105 @@ class _ActionPanel extends StatelessWidget {
               ),
             ),
 
+          // ── Status de conexão + botões Conectar / Desconectar ──
+          if (send.requiresWebView)
+            Padding(
+              padding: const EdgeInsets.only(bottom: 6),
+              child: Container(
+                padding: const EdgeInsets.symmetric(
+                  horizontal: 10,
+                  vertical: 6,
+                ),
+                decoration: BoxDecoration(
+                  color: send.loggedIn
+                      ? const Color(0xFFE8F5E9)
+                      : const Color(0xFFFFF8E1),
+                  borderRadius: BorderRadius.circular(8),
+                  border: Border.all(
+                    color: send.loggedIn
+                        ? AppColors.waGreen
+                        : const Color(0xFFFFCA28),
+                  ),
+                ),
+                child: Row(
+                  children: [
+                    // Indicador de estado
+                    if (send.connectingWa)
+                      const SizedBox(
+                        width: 14,
+                        height: 14,
+                        child: CircularProgressIndicator(
+                          strokeWidth: 2,
+                          valueColor: AlwaysStoppedAnimation(AppColors.waGreen),
+                        ),
+                      )
+                    else
+                      Icon(
+                        send.loggedIn
+                            ? Icons.check_circle
+                            : Icons.warning_amber_rounded,
+                        size: 16,
+                        color: send.loggedIn
+                            ? AppColors.waGreen
+                            : const Color(0xFFF9A825),
+                      ),
+                    const SizedBox(width: 8),
+                    Expanded(
+                      child: Text(
+                        send.connectingWa
+                            ? 'Verificando sessão do WhatsApp Web…'
+                            : send.loggedIn
+                                ? 'WhatsApp Web conectado'
+                                : 'WhatsApp Web desconectado — escaneie o QR Code',
+                        style: TextStyle(
+                          fontSize: 12,
+                          fontWeight: FontWeight.w500,
+                          color: send.loggedIn
+                              ? AppColors.waDarkGreen
+                              : const Color(0xFF795548),
+                        ),
+                      ),
+                    ),
+                    const SizedBox(width: 8),
+                    // Botão Conectar
+                    AppButton(
+                      label: 'Conectar',
+                      icon: Icons.qr_code_scanner,
+                      onPressed: (send.isSending || send.connectingWa)
+                          ? null
+                          : () =>
+                              context.read<SendProvider>().connectWhatsApp(),
+                      color: AppColors.waGreen,
+                      hoverColor: AppColors.waDarkGreen,
+                      pressedColor: AppColors.waDarkGreen,
+                      height: 30,
+                      minWidth: 100,
+                      radius: 15,
+                      fontSize: 11,
+                      disabled: send.isSending || send.connectingWa,
+                    ),
+                    const SizedBox(width: 6),
+                    // Botão Desconectar
+                    AppButton(
+                      label: 'Desconectar',
+                      icon: Icons.logout,
+                      onPressed: send.isSending
+                          ? null
+                          : () => _confirmDisconnect(context, send),
+                      color: AppColors.red,
+                      hoverColor: AppColors.redHover,
+                      pressedColor: AppColors.redPressed,
+                      height: 30,
+                      minWidth: 120,
+                      radius: 15,
+                      fontSize: 11,
+                      disabled: send.isSending,
+                    ),
+                  ],
+                ),
+              ),
+            ),
+
           // ── Dica contextual ──
           if (send.requiresWebView)
             Row(
@@ -280,6 +376,36 @@ class _ActionPanel extends StatelessWidget {
                 ),
               ],
             ),
+        ],
+      ),
+    );
+  }
+
+  void _confirmDisconnect(BuildContext ctx, SendProvider send) {
+    showDialog<void>(
+      context: ctx,
+      builder: (_) => AlertDialog(
+        title: const Text('Desconectar WhatsApp Web?'),
+        content: const Text(
+          'A sessão salva será removida.\n'
+          'Na próxima conexão será necessário escanear o QR Code novamente.',
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(ctx),
+            child: const Text('Cancelar'),
+          ),
+          ElevatedButton(
+            style: ElevatedButton.styleFrom(
+              backgroundColor: AppColors.red,
+              foregroundColor: AppColors.white,
+            ),
+            onPressed: () {
+              Navigator.pop(ctx);
+              ctx.read<SendProvider>().disconnectWhatsApp();
+            },
+            child: const Text('Desconectar'),
+          ),
         ],
       ),
     );
@@ -544,6 +670,61 @@ class _LogPanelState extends State<_LogPanel> {
   void dispose() {
     _scrollCtrl.dispose();
     super.dispose();
+  }
+}
+
+// ── Painel redimensionável (divisor arrastável) ──────────────────
+
+class _ResizableRow extends StatefulWidget {
+  const _ResizableRow({required this.left, required this.right});
+  final Widget left;
+  final Widget right;
+
+  @override
+  State<_ResizableRow> createState() => _ResizableRowState();
+}
+
+class _ResizableRowState extends State<_ResizableRow> {
+  double _leftFraction = 0.55;
+  static const double _dividerWidth = 6.0;
+
+  @override
+  Widget build(BuildContext context) {
+    return LayoutBuilder(
+      builder: (context, constraints) {
+        final total = constraints.maxWidth - _dividerWidth;
+        final leftW = (total * _leftFraction).clamp(120.0, total - 120.0);
+        final rightW = total - leftW;
+        return Row(
+          children: [
+            SizedBox(width: leftW, child: widget.left),
+            GestureDetector(
+              behavior: HitTestBehavior.opaque,
+              onHorizontalDragUpdate: (d) {
+                setState(() {
+                  _leftFraction =
+                      ((leftW + d.delta.dx) / total).clamp(0.15, 0.85);
+                });
+              },
+              child: MouseRegion(
+                cursor: SystemMouseCursors.resizeColumn,
+                child: Container(
+                  width: _dividerWidth,
+                  color: const Color(0xFFDDDDDD),
+                  child: const Center(
+                    child: SizedBox(
+                      width: 2,
+                      child: ColoredBox(color: Color(0xFFBBBBBB)),
+                    ),
+                  ),
+                ),
+              ),
+            ),
+            SizedBox(width: rightW, child: widget.right),
+          ],
+        );
+      },
+    );
   }
 }
 

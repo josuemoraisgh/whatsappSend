@@ -23,6 +23,19 @@ dev_dependencies:
   flutter_test:
     sdk: flutter
   flutter_lints: ^4.0.0
+  flutter_launcher_icons: ^0.14.3
+
+flutter_launcher_icons:
+  android: true
+  ios: false
+  image_path: "assets/ws2.png"
+  windows:
+    generate: true
+    image_path: "assets/ws2.png"
+    icon_size: 256
+  remove_alpha_ios: false
 
 flutter:
   uses-material-design: true
+  assets:
+    - assets/ws2.png

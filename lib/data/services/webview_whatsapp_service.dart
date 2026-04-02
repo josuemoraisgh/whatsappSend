@@ -48,6 +48,7 @@ final class WebViewWhatsAppService implements WhatsAppSenderService {
   }) async* {
     final controller = _controller;
     final rng = math.Random();
+    bool firstContact = true;
 
     // 1 ── abre WhatsApp Web e aguarda login ──────────────────────
     yield SendEventLoginRequired();
@@ -91,108 +92,150 @@ final class WebViewWhatsAppService implements WhatsAppSenderService {
       final name = contact.name.trim();
       final phone = contact.phone.trim();
 
-      if (phone.isEmpty) {
-        yield SendEventLog(
-          '[$i/$total] IGNORADO (sem telefone): ${name.isEmpty ? "-" : name}',
-          LogType.warning,
+      // Bloco isolado por try-catch — uma falha num contato nunca mata o loop.
+      try {
+        if (phone.isEmpty) {
+          yield SendEventLog(
+            '[$i/$total] IGNORADO (sem telefone): ${name.isEmpty ? "-" : name}',
+            LogType.warning,
+          );
+          yield SendEventContactStatus(
+            contact.id,
+            phone,
+            'ignorado',
+            'telefone vazio',
+          );
+          yield SendEventProgress(i, total);
+          results.add(
+            SendResult(
+              name: name,
+              originalPhone: phone,
+              formattedPhone: '',
+              status: 'ignorado',
+              detail: 'telefone vazio',
+              timestamp: DateTime.now(),
+            ),
+          );
+          continue;
+        }
+
+        final template = contact.individualMessage.isNotEmpty
+            ? contact.individualMessage
+            : config.defaultMessage;
+        final message = MessageFormatter.format(template, {
+          'nome': name,
+          'telefone': phone,
+          'name': name,
+        });
+        final tel = PhoneFormatter.format(phone);
+
+        yield SendEventLog('[$i/$total] $name → $tel', LogType.info);
+
+        // Envia texto ──────────────────────────────────────────────
+        final textDbg = <String>[];
+        final textResult = await _sendText(
+          controller,
+          tel,
+          message,
+          config.pageTimeout,
+          firstContact: firstContact,
+          debug: textDbg,
         );
-        yield SendEventContactStatus(
-          contact.id,
-          phone,
-          'ignorado',
-          'telefone vazio',
+        firstContact = false;
+
+        // Exibe debug detalhado no log
+        for (final d in textDbg) {
+          yield SendEventLog('   [dbg] $d', LogType.info);
+        }
+
+        String status = textResult ? 'enviado' : 'erro';
+        String detail = textResult ? 'texto enviado' : 'falha ao enviar texto';
+
+        if (textResult) {
+          yield SendEventLog('   Texto enviado.', LogType.ok);
+        } else {
+          yield SendEventLog('   FALHA ao enviar texto.', LogType.error);
+        }
+
+        // Envia arquivos ───────────────────────────────────────────
+        if (textResult && attachments.isNotEmpty) {
+          for (int j = 0; j < attachments.length; j++) {
+            if (isCancelled()) break;
+            final arq = attachments[j];
+            if (!File(arq).existsSync()) {
+              yield SendEventLog(
+                '   Arquivo ${j + 1} não encontrado: ${p.basename(arq)}',
+                LogType.warning,
+              );
+              continue;
+            }
+            final fileDbg = <String>[];
+            final fileOk = await _sendFile(controller, arq, config.pageTimeout,
+                debug: fileDbg);
+            for (final d in fileDbg) {
+              yield SendEventLog('   [dbg] $d', LogType.info);
+            }
+            if (fileOk) {
+              yield SendEventLog(
+                '   Arquivo ${j + 1} (${p.basename(arq)}) enviado.',
+                LogType.ok,
+              );
+              detail += ' | arq${j + 1} ok';
+            } else {
+              yield SendEventLog(
+                '   Arquivo ${j + 1} (${p.basename(arq)}) FALHOU.',
+                LogType.warning,
+              );
+              detail += ' | arq${j + 1} falhou';
+            }
+          }
+        }
+
+        results.add(
+          SendResult(
+            name: name,
+            originalPhone: phone,
+            formattedPhone: tel,
+            status: status,
+            detail: detail,
+            timestamp: DateTime.now(),
+          ),
         );
+        yield SendEventContactStatus(contact.id, phone, status, detail);
         yield SendEventProgress(i, total);
+
+        // Intervalo anti-bloqueio ──────────────────────────────────
+        if (i < total && !isCancelled()) {
+          final delay = config.intervalMin +
+              rng.nextInt(
+                (config.intervalMax - config.intervalMin).clamp(1, 999) + 1,
+              );
+          yield SendEventLog('   Aguardando ${delay}s…', LogType.info);
+          await Future.delayed(Duration(seconds: delay));
+        }
+      } catch (e) {
+        // Exceção inesperada neste contato — loga e continua para o próximo.
+        yield SendEventLog(
+          '[$i/$total] ERRO INESPERADO ($name): $e',
+          LogType.error,
+        );
         results.add(
           SendResult(
             name: name,
             originalPhone: phone,
             formattedPhone: '',
-            status: 'ignorado',
-            detail: 'telefone vazio',
+            status: 'erro',
+            detail: 'exceção: $e',
             timestamp: DateTime.now(),
           ),
         );
-        continue;
-      }
-
-      final template = contact.individualMessage.isNotEmpty
-          ? contact.individualMessage
-          : config.defaultMessage;
-      final message = MessageFormatter.format(template, {
-        'nome': name,
-        'telefone': phone,
-        'name': name,
-      });
-      final tel = PhoneFormatter.format(phone);
-
-      yield SendEventLog('[$i/$total] $name → $tel', LogType.info);
-
-      // Envia texto ────────────────────────────────────────────────
-      final textResult = await _sendText(
-        controller,
-        tel,
-        message,
-        config.pageTimeout,
-      );
-      String status = textResult ? 'enviado' : 'erro';
-      String detail = textResult ? 'texto enviado' : 'falha ao enviar texto';
-
-      if (textResult) {
-        yield SendEventLog('   Texto enviado.', LogType.ok);
-      } else {
-        yield SendEventLog('   FALHA ao enviar texto.', LogType.error);
-      }
-
-      // Envia arquivos ─────────────────────────────────────────────
-      if (textResult && attachments.isNotEmpty) {
-        for (int j = 0; j < attachments.length; j++) {
-          if (isCancelled()) break;
-          final arq = attachments[j];
-          if (!File(arq).existsSync()) {
-            yield SendEventLog(
-              '   Arquivo ${j + 1} não encontrado.',
-              LogType.warning,
-            );
-            continue;
-          }
-          final fileOk = await _sendFile(controller, arq, config.pageTimeout);
-          if (fileOk) {
-            yield SendEventLog(
-              '   Arquivo ${j + 1} (${p.basename(arq)}) enviado.',
-              LogType.ok,
-            );
-            detail += ' | arq${j + 1} ok';
-          } else {
-            yield SendEventLog(
-              '   Arquivo ${j + 1} (${p.basename(arq)}) falhou.',
-              LogType.warning,
-            );
-          }
-        }
-      }
-
-      results.add(
-        SendResult(
-          name: name,
-          originalPhone: phone,
-          formattedPhone: tel,
-          status: status,
-          detail: detail,
-          timestamp: DateTime.now(),
-        ),
-      );
-      yield SendEventContactStatus(contact.id, phone, status, detail);
-      yield SendEventProgress(i, total);
-
-      // Intervalo anti-bloqueio ─────────────────────────────────────
-      if (i < total && !isCancelled()) {
-        final delay = config.intervalMin +
-            rng.nextInt(
-              (config.intervalMax - config.intervalMin).clamp(1, 999) + 1,
-            );
-        yield SendEventLog('   Aguardando ${delay}s…', LogType.info);
-        await Future.delayed(Duration(seconds: delay));
+        yield SendEventContactStatus(
+          contact.id,
+          phone,
+          'erro',
+          'exceção: $e',
+        );
+        yield SendEventProgress(i, total);
       }
     }
 
@@ -219,47 +262,307 @@ final class WebViewWhatsAppService implements WhatsAppSenderService {
     AppWebViewController ctrl,
     String tel,
     String message,
-    int timeout,
-  ) async {
-    final encoded = Uri.encodeComponent(message);
-    final url = 'https://web.whatsapp.com/send?phone=$tel&text=$encoded';
+    int timeout, {
+    bool firstContact = true,
+    List<String>? debug,
+  }) async {
+    void log(String s) => debug?.add(s);
 
-    await ctrl.loadUrl(url);
+    try {
+      // 1. Navega até o chat.
+      //    — Primeiro contato: URL (precisa de carregamento completo).
+      //    — Demais: barra de pesquisa interna do WA Web (SPA, instantâneo).
+      if (firstContact) {
+        log('Navegação inicial via loadUrl');
+        await ctrl.loadUrl('https://web.whatsapp.com/send?phone=$tel');
+      } else {
+        log('Navegação via search bar (SPA)');
+        final navOk = await _navigateViaSearch(ctrl, tel, debug: debug);
+        if (!navOk) {
+          log('Search falhou, fallback via URL');
+          await ctrl.executeJavaScript(
+            'window.location.href = ${jsonEncode('https://web.whatsapp.com/send?phone=$tel')};',
+          );
+        }
+      }
 
-    // Aguarda caixa de mensagem aparecer
-    final boxFound = await _waitForSelector(
-      ctrl,
-      _kSelMsgBox,
-      Duration(seconds: timeout),
-    );
-    if (!boxFound) return false;
+      // 2. Polling para caixa de mensagem + popup de erro.
+      log('Aguardando caixa de msgs (timeout: ${timeout}s)…');
+      final msgBoxReady = await _waitForMsgBoxOrError(
+        ctrl,
+        Duration(seconds: timeout),
+        debug: debug,
+      );
 
-    await Future.delayed(const Duration(milliseconds: 1500));
+      if (msgBoxReady == _NavResult.errorPopup) {
+        log('Número inválido — popup detectado');
+        return false;
+      }
+      if (msgBoxReady == _NavResult.timeout) {
+        log('Timeout — caixa de msgs não apareceu');
+        return false;
+      }
+      log('Caixa de msgs encontrada');
 
-    // Tenta clicar no botão send via CSS selectors
-    final sendSelectors = [
-      'span[data-icon="send"]',
-      '[data-testid="send"]',
-      'div[aria-label="Enviar"]',
-      'div[aria-label="Send"]',
-      'button[aria-label="Send"]',
-    ];
+      // 3. Injeta o texto via execCommand (compatível com React/Lexical).
+      final injected = await ctrl.executeJavaScript('''
+        (function(msg) {
+          var sels = [
+            'div[contenteditable="true"][data-tab="10"]',
+            'div[contenteditable="true"][aria-label*="mensagem"]',
+            'div[contenteditable="true"][aria-label*="message"]',
+            'footer div[contenteditable="true"]'
+          ];
+          for (var s of sels) {
+            var el = document.querySelector(s);
+            if (el) {
+              el.focus();
+              document.execCommand('selectAll', false, null);
+              document.execCommand('delete', false, null);
+              document.execCommand('insertText', false, msg);
+              el.dispatchEvent(new Event('input', {bubbles: true}));
+              return el.textContent.trim().length > 0 ? 'ok' : 'empty';
+            }
+          }
+          return 'no_box';
+        })(${jsonEncode(message)})
+      ''');
+      log('Injeção de texto: $injected');
+      if (injected != 'ok') return false;
 
-    for (final sel in sendSelectors) {
-      final clicked = await ctrl.executeJavaScript('''
+      await Future.delayed(const Duration(milliseconds: 500));
+
+      // 4. Envia a mensagem (botão enviar → fallback Enter)
+      final sent = await _clickSendButton(ctrl, debug: debug);
+      if (!sent) {
+        log('FALHA: nenhum método de envio funcionou');
+        return false;
+      }
+
+      log('Mensagem enviada ✓');
+      await Future.delayed(const Duration(seconds: 1));
+      return true;
+    } catch (e) {
+      log('Exceção: $e');
+      return false;
+    }
+  }
+
+  // ─────────────────────────────────────────────────────────────────
+  //  NAVEGAÇÃO RÁPIDA VIA SEARCH BAR (SPA — sem reload)
+  // ─────────────────────────────────────────────────────────────────
+
+  /// Usa a barra de pesquisa do WhatsApp Web para navegar até o contato
+  /// sem recarregar a página inteira. Retorna `true` se conseguiu abrir o chat.
+  Future<bool> _navigateViaSearch(
+    AppWebViewController ctrl,
+    String tel, {
+    List<String>? debug,
+  }) async {
+    void log(String s) => debug?.add(s);
+
+    try {
+      // 1. Fecha qualquer modal/search aberta e volta para a lista de conversas
+      await ctrl.executeJavaScript('''
         (function() {
-          var el = document.querySelector(${jsonEncode(sel)});
-          if (el) { el.click(); return true; }
-          return false;
+          var esc = new KeyboardEvent('keydown', {key:'Escape', code:'Escape', keyCode:27, bubbles:true});
+          document.dispatchEvent(esc);
         })()
       ''');
-      if (clicked.toString() == 'true') {
-        await Future.delayed(const Duration(seconds: 2));
-        return true;
-      }
+      await Future.delayed(const Duration(milliseconds: 200));
+
+      // 2. Abre "Novo Chat" ou clica no ícone de pesquisa
+      final searchOpened = await ctrl.executeJavaScript('''
+        (function() {
+          var sels = [
+            'span[data-icon="new-chat-outline"]',
+            'span[data-icon="search"]',
+            '[data-testid="chat-list-search"]',
+            'div[contenteditable="true"][data-tab="3"]'
+          ];
+          for (var sel of sels) {
+            var el = document.querySelector(sel);
+            if (el) {
+              if (el.contentEditable === 'true') {
+                el.focus();
+                return 'search_box_direct';
+              }
+              var btn = el.closest('button, div[role="button"]');
+              if (btn) btn.click(); else el.click();
+              return 'opened:' + sel;
+            }
+          }
+          return 'not_found';
+        })()
+      ''');
+      log('Search open: $searchOpened');
+      if (searchOpened == 'not_found') return false;
+
+      await Future.delayed(const Duration(milliseconds: 400));
+
+      // 3. Encontra a caixa de pesquisa e digita o telefone
+      final typed = await ctrl.executeJavaScript('''
+        (function(phone) {
+          var sels = [
+            'div[contenteditable="true"][data-tab="3"]',
+            'div[contenteditable="true"][aria-label*="Pesquisar"]',
+            'div[contenteditable="true"][aria-label*="Search"]',
+            '[data-testid="chat-list-search"] div[contenteditable="true"]'
+          ];
+          for (var s of sels) {
+            var el = document.querySelector(s);
+            if (el) {
+              el.focus();
+              document.execCommand('selectAll', false, null);
+              document.execCommand('delete', false, null);
+              document.execCommand('insertText', false, phone);
+              el.dispatchEvent(new Event('input', {bubbles: true}));
+              return 'typed';
+            }
+          }
+          return 'no_search_box';
+        })(${jsonEncode(tel)})
+      ''');
+      log('Digitou tel: $typed');
+      if (typed != 'typed') return false;
+
+      // 4. Aguarda resultados aparecerem (até 3s)
+      await Future.delayed(const Duration(milliseconds: 1200));
+
+      // 5. Clica no primeiro resultado da pesquisa
+      final clicked = await ctrl.executeJavaScript('''
+        (function() {
+          // Resultados da busca no painel de novo chat / lista lateral
+          var resultSels = [
+            '[data-testid="cell-frame-container"]',
+            '[data-testid="chat-list-item"]',
+            '[data-testid="search-result"]',
+            '#pane-side [role="listitem"]',
+            '#pane-side [role="row"]'
+          ];
+          for (var sel of resultSels) {
+            var items = document.querySelectorAll(sel);
+            if (items.length > 0) {
+              items[0].click();
+              return 'clicked:' + sel + ':' + items.length;
+            }
+          }
+
+          // Fallback: link "Enviar mensagem para +XX" que aparece para
+          // números que não estão nos contatos.
+          var allSpans = document.querySelectorAll('span[title]');
+          for (var sp of allSpans) {
+            var t = sp.title || sp.textContent || '';
+            if (t.includes('+') || t.includes('mensagem') || t.includes('message')) {
+              sp.closest('[role="listitem"], [role="row"], [role="button"]')?.click();
+              return 'span_fallback:' + t.substring(0, 40);
+            }
+          }
+          return 'no_result';
+        })()
+      ''');
+      log('Clique resultado: $clicked');
+
+      // Considera sucesso se clicou em algo; o polling do message box
+      // no _sendText vai confirmar se o chat realmente abriu.
+      return clicked != 'no_result';
+    } catch (e) {
+      log('Search error: $e');
+      return false;
+    }
+  }
+
+  /// Resultado da navegação até o chat.
+  static const _NavResult = (ok: 0, errorPopup: 1, timeout: 2);
+
+  /// Faz polling simultâneo da caixa de mensagem e do popup de erro.
+  Future<int> _waitForMsgBoxOrError(
+    AppWebViewController ctrl,
+    Duration timeout, {
+    List<String>? debug,
+  }) async {
+    final end = DateTime.now().add(timeout);
+    int attempts = 0;
+    while (DateTime.now().isBefore(end)) {
+      attempts++;
+      try {
+        // Verifica popup de erro (número inválido)
+        final result = await ctrl.executeJavaScript('''
+          (function() {
+            var popup = document.querySelector('[data-animate-modal-popup="true"]')
+                     || document.querySelector('div[role="alert"]');
+            if (popup) {
+              var t = popup.textContent.toLowerCase();
+              if (t.includes('invalid') || t.includes('inválid') ||
+                  t.includes('phone number') || t.includes('número')) return 'error';
+            }
+            var sels = [
+              'div[contenteditable="true"][data-tab="10"]',
+              'div[contenteditable="true"][aria-label*="mensagem"]',
+              'div[contenteditable="true"][aria-label*="message"]',
+              'footer div[contenteditable="true"]'
+            ];
+            for (var s of sels) {
+              if (document.querySelector(s)) return 'ready';
+            }
+            return 'waiting';
+          })()
+        ''');
+        if (result == 'error') return _NavResult.errorPopup;
+        if (result == 'ready') return _NavResult.ok;
+      } catch (_) {}
+      await Future.delayed(const Duration(milliseconds: 400));
+    }
+    debug?.add('waitForMsgBox: $attempts tentativas, timeout');
+    return _NavResult.timeout;
+  }
+
+  /// Tenta clicar no botão de enviar de múltiplas formas.
+  Future<bool> _clickSendButton(
+    AppWebViewController ctrl, {
+    List<String>? debug,
+  }) async {
+    void log(String s) => debug?.add(s);
+
+    // Abordagem 1: encontra o ícone de envio e clica no botão pai
+    final btnResult = await ctrl.executeJavaScript('''
+      (function() {
+        var icons = [
+          'span[data-icon="send"]',
+          '[data-testid="send"]',
+          'span[data-icon="compose-btn-send"]'
+        ];
+        for (var sel of icons) {
+          var icon = document.querySelector(sel);
+          if (icon) {
+            // Sobe na árvore DOM para achar o <button> ou [role=button]
+            var btn = icon.closest('button, [role="button"]');
+            if (btn) { btn.click(); return 'btn_click:' + sel; }
+            // Fallback: clica no próprio ícone
+            icon.click();
+            return 'icon_click:' + sel;
+          }
+        }
+
+        // Tenta labels (PT/EN)
+        var labels = ['Enviar', 'Send'];
+        for (var lbl of labels) {
+          var el = document.querySelector('div[aria-label="' + lbl + '"]')
+                || document.querySelector('button[aria-label="' + lbl + '"]');
+          if (el) { el.click(); return 'label_click:' + lbl; }
+        }
+        return 'not_found';
+      })()
+    ''');
+    log('Botão enviar: $btnResult');
+
+    if (btnResult != 'not_found') {
+      await Future.delayed(const Duration(milliseconds: 800));
+      return true;
     }
 
-    // Fallback: pressiona Enter no campo de texto
+    // Abordagem 2: tecla Enter no campo de texto
+    log('Tentando Enter no campo de texto');
     final enterOk = await ctrl.executeJavaScript('''
       (function() {
         var sels = [
@@ -272,116 +575,183 @@ final class WebViewWhatsAppService implements WhatsAppSenderService {
             el.focus();
             var opts = {key:'Enter', code:'Enter', keyCode:13, which:13, bubbles:true};
             el.dispatchEvent(new KeyboardEvent('keydown', opts));
-            el.dispatchEvent(new KeyboardEvent('keypress', opts));
-            el.dispatchEvent(new KeyboardEvent('keyup', opts));
-            return true;
+            return 'enter_ok';
           }
         }
-        return false;
+        return 'no_box';
       })()
     ''');
+    log('Resultado Enter: $enterOk');
 
-    if (enterOk.toString() == 'true') {
-      await Future.delayed(const Duration(seconds: 2));
+    if (enterOk == 'enter_ok') {
+      await Future.delayed(const Duration(milliseconds: 800));
       return true;
     }
 
     return false;
   }
 
-  // ─────────────────────────────────────────────────────────────────
-  //  ENVIAR ARQUIVO (via base64 → JS File API)
-  // ─────────────────────────────────────────────────────────────────
   Future<bool> _sendFile(
     AppWebViewController ctrl,
     String filePath,
-    int timeout,
-  ) async {
+    int timeout, {
+    List<String>? debug,
+  }) async {
+    void log(String s) => debug?.add(s);
+
     try {
-      final file = File(filePath);
-      if (!await file.exists()) return false;
-
-      final bytes = await file.readAsBytes();
-      final b64 = base64Encode(bytes);
-      final fileName = p.basename(filePath);
-      final mimeType = lookupMimeType(filePath) ?? 'application/octet-stream';
-
-      // Clica no botão de annexo
-      final attachSelectors = [
-        'span[data-icon="attach-menu-plus"]',
-        'span[data-icon="plus"]',
-        'div[title="Attach"]',
-        'span[data-icon="clip"]',
-      ];
-
-      bool attachClicked = false;
-      for (final sel in attachSelectors) {
-        final r = await ctrl.executeJavaScript('''
-          (function() {
-            var el = document.querySelector(${jsonEncode(sel)});
-            if (el) { el.click(); return true; }
-            return false;
-          })()
-        ''');
-        if (r.toString() == 'true') {
-          attachClicked = true;
-          break;
+      return await Future(() async {
+        final file = File(filePath);
+        if (!await file.exists()) {
+          log('Arquivo não encontrado: $filePath');
+          return false;
         }
-      }
-      if (!attachClicked) return false;
 
-      await Future.delayed(const Duration(milliseconds: 900));
+        final bytes = await file.readAsBytes();
+        final b64 = base64Encode(bytes);
+        final fileName = p.basename(filePath);
+        final mimeType = lookupMimeType(filePath) ?? 'application/octet-stream';
+        log('Arquivo: $fileName (${bytes.length} bytes, $mimeType)');
 
-      // Injeta arquivo via DataTransfer API
-      final fileSet = await ctrl.executeJavaScript('''
-        (function(b64, name, mime) {
-          try {
-            var binary = atob(b64);
-            var bytes = new Uint8Array(binary.length);
-            for (var i = 0; i < binary.length; i++) bytes[i] = binary.charCodeAt(i);
-            var file = new File([bytes], name, {type: mime});
-            var dt = new DataTransfer();
-            dt.items.add(file);
-            var inputs = document.querySelectorAll('input[type="file"]');
-            for (var inp of inputs) {
-              try {
-                Object.defineProperty(inp, 'files', {value: dt.files, configurable: true});
-                inp.dispatchEvent(new Event('change', {bubbles: true}));
-                return true;
-              } catch(e) {}
-            }
-            return false;
-          } catch(e) { return false; }
-        })(${jsonEncode(b64)}, ${jsonEncode(fileName)}, ${jsonEncode(mimeType)})
-      ''');
-
-      if (fileSet.toString() != 'true') return false;
-
-      await Future.delayed(const Duration(seconds: 2));
-
-      // Clica no botão de envio do arquivo
-      final sendSelectors = [
-        'span[data-icon="send"]',
-        'div[aria-label="Enviar"]',
-        '[data-testid="send"]',
-      ];
-      for (final sel in sendSelectors) {
-        final r = await ctrl.executeJavaScript('''
-          (function() {
-            var el = document.querySelector(${jsonEncode(sel)});
-            if (el) { el.click(); return true; }
-            return false;
-          })()
+        // ── Método 1: ClipboardEvent paste ────────────────────────
+        log('Tentando método 1 (paste)…');
+        final pasteResult = await ctrl.executeJavaScript('''
+          (function(b64, name, mime) {
+            try {
+              var binary = atob(b64);
+              var buf    = new Uint8Array(binary.length);
+              for (var i = 0; i < binary.length; i++) buf[i] = binary.charCodeAt(i);
+              var f  = new File([buf], name, {type: mime, lastModified: Date.now()});
+              var dt = new DataTransfer();
+              dt.items.add(f);
+              var sels = [
+                'div[contenteditable="true"][data-tab="10"]',
+                'footer div[contenteditable="true"]'
+              ];
+              for (var s of sels) {
+                var el = document.querySelector(s);
+                if (el) {
+                  el.focus();
+                  el.dispatchEvent(new ClipboardEvent('paste', {
+                    bubbles: true, cancelable: true, clipboardData: dt
+                  }));
+                  return 'paste_ok';
+                }
+              }
+              return 'no_box';
+            } catch(e) { return 'paste_err:' + e.message; }
+          })(${jsonEncode(b64)}, ${jsonEncode(fileName)}, ${jsonEncode(mimeType)})
         ''');
-        if (r.toString() == 'true') {
+        log('Paste result: $pasteResult');
+
+        if (pasteResult == 'paste_ok') {
           await Future.delayed(const Duration(seconds: 2));
-          return true;
+          final sendOk = await _clickFilePreviewSend(ctrl, debug: debug);
+          if (sendOk) return true;
+          log('Modal de preview não encontrado após paste');
         }
-      }
-      return false;
-    } catch (_) {
+
+        // ── Método 2: DragEvent drop ──────────────────────────────
+        log('Tentando método 2 (drop)…');
+        final dropResult = await ctrl.executeJavaScript('''
+          (function(b64, name, mime) {
+            try {
+              var binary = atob(b64);
+              var buf    = new Uint8Array(binary.length);
+              for (var i = 0; i < binary.length; i++) buf[i] = binary.charCodeAt(i);
+              var f  = new File([buf], name, {type: mime, lastModified: Date.now()});
+              var dt = new DataTransfer();
+              dt.items.add(f);
+              var targets = [
+                '#main footer',
+                '#main',
+                '[data-testid="conversation-panel-body"]'
+              ];
+              for (var t of targets) {
+                var el = document.querySelector(t);
+                if (el) {
+                  el.dispatchEvent(new DragEvent('dragenter', {bubbles: true, dataTransfer: dt}));
+                  el.dispatchEvent(new DragEvent('dragover',  {bubbles: true, dataTransfer: dt}));
+                  el.dispatchEvent(new DragEvent('drop',      {bubbles: true, cancelable: true, dataTransfer: dt}));
+                  return 'drop_ok';
+                }
+              }
+              return 'no_target';
+            } catch(e) { return 'drop_err:' + e.message; }
+          })(${jsonEncode(b64)}, ${jsonEncode(fileName)}, ${jsonEncode(mimeType)})
+        ''');
+        log('Drop result: $dropResult');
+
+        if (dropResult == 'drop_ok') {
+          await Future.delayed(const Duration(seconds: 2));
+          final sendOk = await _clickFilePreviewSend(ctrl, debug: debug);
+          if (sendOk) return true;
+          log('Modal de preview não encontrado após drop');
+        }
+
+        log('Ambos os métodos falharam');
+        return false;
+      }).timeout(
+        Duration(seconds: timeout > 0 ? timeout : 20),
+        onTimeout: () {
+          log('TIMEOUT global ao enviar arquivo');
+          return false;
+        },
+      );
+    } catch (e) {
+      log('Exceção: $e');
       return false;
     }
+  }
+
+  /// Clica no botão de envio dentro do modal de preview de arquivo/mídia.
+  Future<bool> _clickFilePreviewSend(
+    AppWebViewController ctrl, {
+    List<String>? debug,
+  }) async {
+    void log(String s) => debug?.add(s);
+
+    const previewSendSels = [
+      'div[data-testid="media-upload-send-btn"]',
+      'span[data-icon="send-white"]',
+      'span[data-icon="send"]',
+    ];
+    // Aguarda o modal de preview aparecer (até 5s)
+    final previewFound = await _waitForSelector(
+      ctrl,
+      previewSendSels.join(', '),
+      const Duration(seconds: 5),
+    );
+    log('Preview modal: ${previewFound ? "encontrado" : "não encontrado"}');
+    if (!previewFound) return false;
+
+    // Tenta clicar no botão (busca o parent button)
+    final clickResult = await ctrl.executeJavaScript('''
+      (function() {
+        var sels = [
+          'div[data-testid="media-upload-send-btn"]',
+          'span[data-icon="send-white"]',
+          'span[data-icon="send"]'
+        ];
+        for (var sel of sels) {
+          var el = document.querySelector(sel);
+          if (el) {
+            var btn = el.closest('button, [role="button"]');
+            if (btn) { btn.click(); return 'btn_click:' + sel; }
+            el.click();
+            return 'icon_click:' + sel;
+          }
+        }
+        return 'not_found';
+      })()
+    ''');
+    log('Clique preview enviar: $clickResult');
+
+    if (clickResult != 'not_found') {
+      await Future.delayed(const Duration(seconds: 3));
+      return true;
+    }
+    return false;
   }
 
   // ─────────────────────────────────────────────────────────────────
@@ -400,9 +770,9 @@ final class WebViewWhatsAppService implements WhatsAppSenderService {
         final r = await ctrl.executeJavaScript(
           'Boolean(document.querySelector(${jsonEncode(selector)}))',
         );
-        if (r.toString() == 'true') return true;
+        if (r == 'true') return true;
       } catch (_) {}
-      await Future.delayed(const Duration(milliseconds: 600));
+      await Future.delayed(const Duration(milliseconds: 400));
     }
     return false;
   }

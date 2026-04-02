@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'dart:io' show Platform;
 
 import 'package:flutter/foundation.dart';
@@ -53,6 +54,7 @@ final class SendProvider extends ChangeNotifier {
   bool _loginRequired = false;
   bool _loggedIn = false;
   bool _switchingMode = false;
+  bool _connectingWa = false; // verifica sessão em background
 
   int _progress = 0;
   int _total = 0;
@@ -64,6 +66,7 @@ final class SendProvider extends ChangeNotifier {
   bool get loginRequired => _loginRequired;
   bool get loggedIn => _loggedIn;
   bool get switchingMode => _switchingMode;
+  bool get connectingWa => _connectingWa;
   int get progress => _progress;
   int get total => _total;
   List<LogEntry> get log => List.unmodifiable(_log);
@@ -113,8 +116,7 @@ final class SendProvider extends ChangeNotifier {
       String phone,
       String status,
       String detail,
-    )
-    onContactStatus,
+    ) onContactStatus,
     required VoidCallback onFinished,
   }) async {
     _isSending = true;
@@ -145,11 +147,11 @@ final class SendProvider extends ChangeNotifier {
           notifyListeners();
 
         case SendEventContactStatus(
-          :final contactId,
-          :final phone,
-          :final status,
-          :final detail,
-        ):
+            :final contactId,
+            :final phone,
+            :final status,
+            :final detail,
+          ):
           onContactStatus(contactId, phone, status, detail);
 
         case SendEventLoginRequired():
@@ -176,6 +178,78 @@ final class SendProvider extends ChangeNotifier {
     _cancelRequested = true;
   }
 
+  // ── Conectar / Desconectar WhatsApp Web ──────────────────────────
+
+  /// Abre o WhatsApp Web no WebView e verifica em background se a sessão
+  /// anterior ainda é válida (sem QR). Só disponível quando usa WebView.
+  Future<void> connectWhatsApp() async {
+    final ctrl = _webViewController;
+    if (ctrl == null || _isSending || _connectingWa) return;
+
+    _loginRequired = true;
+    _loggedIn = false;
+    _showWebView = true;
+    _connectingWa = true;
+    notifyListeners();
+
+    try {
+      await ctrl.loadUrl('https://web.whatsapp.com');
+    } catch (_) {}
+
+    // Polling em background (15s) para detectar se já estava logado
+    unawaited(
+      Future.microtask(() async {
+        const sel = '#pane-side, [data-testid="chat-list"],'
+            'div[aria-label="Lista de conversas"],'
+            'div[aria-label="Conversation list"]';
+        final deadline = DateTime.now().add(const Duration(seconds: 15));
+        while (DateTime.now().isBefore(deadline)) {
+          try {
+            final r = await ctrl.executeJavaScript(
+              'Boolean(document.querySelector(${'"$sel"'}))',
+            );
+            if (r == 'true') {
+              _loggedIn = true;
+              break;
+            }
+          } catch (_) {}
+          await Future.delayed(const Duration(milliseconds: 800));
+        }
+        _connectingWa = false;
+        notifyListeners();
+      }),
+    );
+  }
+
+  /// Remove toda a sessão salva do WhatsApp Web e reinicializa o WebView.
+  /// O próximo acesso exigirá novo QR Code.
+  Future<void> disconnectWhatsApp() async {
+    if (_isSending) return;
+
+    _loggedIn = false;
+    _loginRequired = false;
+    _connectingWa = false;
+    notifyListeners();
+
+    final oldCtrl = _webViewController;
+    if (oldCtrl == null) return;
+
+    // 1. Limpa cookies / pasta de sessão
+    await oldCtrl.clearSession();
+
+    // 2. Descarta o controller antigo
+    oldCtrl.dispose();
+    _webViewController = null;
+
+    // 3. Cria um controller novo (pasta limpa será recriada pelo initialize)
+    final newCtrl = createWebViewController();
+    await newCtrl.initialize();
+    _webViewController = newCtrl;
+    _service = WebViewWhatsAppService(newCtrl);
+
+    notifyListeners();
+  }
+
   void clearLog() {
     _log.clear();
     notifyListeners();
@@ -191,6 +265,10 @@ final class SendProvider extends ChangeNotifier {
     }
     final ctrl = createWebViewController();
     await ctrl.initialize();
-    return SendProvider._(WebViewWhatsAppService(ctrl), ctrl, SendMode.webView);
+    final provider =
+        SendProvider._(WebViewWhatsAppService(ctrl), ctrl, SendMode.webView);
+    // Tenta restaurar sessão em background ao abrir o app
+    unawaited(provider.connectWhatsApp());
+    return provider;
   }
 }
