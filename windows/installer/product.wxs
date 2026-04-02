@@ -1,0 +1,108 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+  product.wxs — Definição do instalador MSI para WhatsApp Sender (WiX v3/x64)
+
+  UpgradeCode é IMUTÁVEL: não altere após a primeira publicação,
+  pois identifica a família do produto para atualizações e remoções.
+-->
+<Wix xmlns="http://schemas.microsoft.com/wix/2006/wi">
+
+  <Product
+    Id="*"
+    Name="WhatsApp Sender"
+    Language="1033"
+    Version="$(var.ProductVersion)"
+    Manufacturer="Josue Morais"
+    UpgradeCode="{A7B2C9D4-E3F6-4A1B-8C2D-5E6F7A8B9C0D}">
+
+    <Package
+      InstallerVersion="500"
+      Compressed="yes"
+      InstallScope="perMachine"
+      Platform="x64"
+      Description="WhatsApp Sender — Instalador Windows" />
+
+    <!-- Impede instalação de versão mais antiga sobre mais nova -->
+    <MajorUpgrade
+      DowngradeErrorMessage="Uma versão mais recente do WhatsApp Sender já está instalada." />
+
+    <MediaTemplate EmbedCab="yes" />
+
+    <!-- Ícone extraído do próprio executável -->
+    <Icon Id="AppIcon" SourceFile="$(var.AppExe)" />
+    <Property Id="ARPPRODUCTICON" Value="AppIcon" />
+    <Property Id="ARPHELPLINK"    Value="https://github.com/josuemoraisgh/whatsappSend" />
+
+    <!-- ─── Estrutura de diretórios ─────────────────────────────────── -->
+    <Directory Id="TARGETDIR" Name="SourceDir">
+
+      <!-- Arquivos do aplicativo em C:\Program Files\ -->
+      <Directory Id="ProgramFiles64Folder">
+        <Directory Id="INSTALLFOLDER" Name="WhatsApp Sender" />
+      </Directory>
+
+      <!-- Atalho no Menu Iniciar -->
+      <Directory Id="ProgramMenuFolder">
+        <Directory Id="AppMenuFolder" Name="WhatsApp Sender" />
+      </Directory>
+
+      <!-- Atalho na Área de Trabalho -->
+      <Directory Id="DesktopFolder" Name="Desktop" />
+
+    </Directory>
+
+    <!-- ─── Atalho: Menu Iniciar ─────────────────────────────────────── -->
+    <DirectoryRef Id="AppMenuFolder">
+      <Component Id="StartMenuShortcut"
+                 Guid="{B8C3D0E5-F4A7-5B2C-9D3E-6F0A8B9C0D1E}">
+        <Shortcut
+          Id="StartMenuEntry"
+          Name="WhatsApp Sender"
+          Description="Envio de mensagens via WhatsApp"
+          Target="[INSTALLFOLDER]whatsapp_sender.exe"
+          WorkingDirectory="INSTALLFOLDER" />
+        <!-- Remove a pasta ao desinstalar -->
+        <RemoveFolder Id="RemoveAppMenuFolder"
+                      Directory="AppMenuFolder"
+                      On="uninstall" />
+        <RegistryValue Root="HKCU"
+                       Key="Software\JosueMorais\WhatsAppSender"
+                       Name="StartMenuInstalled"
+                       Type="integer" Value="1"
+                       KeyPath="yes" />
+      </Component>
+    </DirectoryRef>
+
+    <!-- ─── Atalho: Área de Trabalho ────────────────────────────────── -->
+    <DirectoryRef Id="DesktopFolder">
+      <Component Id="DesktopShortcut"
+                 Guid="{C9D4E1F6-A5B8-6C3D-0E4F-7A8B9C0D1E2F}">
+        <Shortcut
+          Id="DesktopEntry"
+          Name="WhatsApp Sender"
+          Description="Envio de mensagens via WhatsApp"
+          Target="[INSTALLFOLDER]whatsapp_sender.exe"
+          WorkingDirectory="INSTALLFOLDER" />
+        <RegistryValue Root="HKCU"
+                       Key="Software\JosueMorais\WhatsAppSender"
+                       Name="DesktopInstalled"
+                       Type="integer" Value="1"
+                       KeyPath="yes" />
+      </Component>
+    </DirectoryRef>
+
+    <!-- ─── Feature principal ───────────────────────────────────────── -->
+    <Feature Id="Complete" Title="WhatsApp Sender" Level="1">
+      <!-- Arquivos colhidos automaticamente pelo heat.exe -->
+      <ComponentGroupRef Id="HarvestedFiles" />
+      <!-- Atalhos -->
+      <ComponentRef Id="StartMenuShortcut" />
+      <ComponentRef Id="DesktopShortcut" />
+    </Feature>
+
+    <!-- ─── Interface do instalador (WixUI_Minimal) ──────────────────── -->
+    <UIRef Id="WixUI_Minimal" />
+    <WixVariable Id="WixUILicenseRtf" Value="windows\installer\License.rtf" />
+
+  </Product>
+</Wix>
