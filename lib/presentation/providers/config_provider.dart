@@ -50,4 +50,10 @@ final class ConfigProvider extends ChangeNotifier {
 
   Future<void> updateSplitFraction(double fraction) =>
       update(_config.copyWith(splitFraction: fraction));
+
+  /// Log colapsado
+  bool get logCollapsed => _config.logCollapsed;
+
+  Future<void> updateLogCollapsed(bool collapsed) =>
+      update(_config.copyWith(logCollapsed: collapsed));
 }

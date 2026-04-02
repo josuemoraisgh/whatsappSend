@@ -18,10 +18,15 @@ class SendScreen extends StatefulWidget {
 }
 
 class _SendScreenState extends State<SendScreen> {
-  bool _logCollapsed = false;
+  late bool _logCollapsed;
+  bool _initialized = false;
 
   @override
   Widget build(BuildContext context) {
+    if (!_initialized) {
+      _logCollapsed = context.read<ConfigProvider>().logCollapsed;
+      _initialized = true;
+    }
     return Consumer<SendProvider>(
       builder: (context, send, _) {
         if (send.switchingMode) {
@@ -57,8 +62,12 @@ class _SendScreenState extends State<SendScreen> {
                                   child: _WebViewPanel(send, expanded: true)),
                               _CollapsedLogBar(
                                 send: send,
-                                onExpand: () =>
-                                    setState(() => _logCollapsed = false),
+                                onExpand: () {
+                                  setState(() => _logCollapsed = false);
+                                  context
+                                      .read<ConfigProvider>()
+                                      .updateLogCollapsed(false);
+                                },
                               ),
                             ],
                           )
@@ -66,8 +75,12 @@ class _SendScreenState extends State<SendScreen> {
                             left: _WebViewPanel(send, expanded: true),
                             right: _LogPanel(
                               send,
-                              onCollapse: () =>
-                                  setState(() => _logCollapsed = true),
+                              onCollapse: () {
+                                setState(() => _logCollapsed = true);
+                                context
+                                    .read<ConfigProvider>()
+                                    .updateLogCollapsed(true);
+                              },
                             ),
                             initialFraction:
                                 context.read<ConfigProvider>().splitFraction,
@@ -690,78 +703,130 @@ class _LogPanelState extends State<_LogPanel> {
 
   @override
   Widget build(BuildContext context) {
-    return Column(
-      children: [
-        Container(
-          color: AppColors.background,
-          padding: const EdgeInsets.fromLTRB(14, 6, 14, 4),
-          child: Row(
-            children: [
-              const Expanded(
-                child: Text(
-                  'Log de execução:',
-                  style: TextStyle(fontWeight: FontWeight.bold, fontSize: 13),
-                  overflow: TextOverflow.ellipsis,
-                ),
-              ),
-              const SizedBox(width: 4),
-              if (widget.onCollapse != null)
-                Padding(
-                  padding: const EdgeInsets.only(right: 6),
-                  child: AppButton(
-                    label: 'Esconder',
-                    icon: Icons.visibility_off,
-                    onPressed: widget.onCollapse,
-                    color: AppColors.neutralBtn,
-                    hoverColor: AppColors.neutralBtnHover,
-                    pressedColor: AppColors.neutralBtnPressed,
-                    height: 28,
-                    minWidth: 80,
-                    radius: 14,
-                    fontSize: 11,
-                  ),
-                ),
-              AppButton(
-                label: 'Limpar',
-                icon: Icons.clear_all,
-                onPressed: widget.send.clearLog,
-                color: AppColors.neutralBtn,
-                hoverColor: AppColors.neutralBtnHover,
-                pressedColor: AppColors.neutralBtnPressed,
-                height: 28,
-                minWidth: 80,
-                radius: 14,
-                fontSize: 11,
-              ),
-            ],
-          ),
-        ),
+    return LayoutBuilder(
+      builder: (context, constraints) {
+        final w = constraints.maxWidth;
 
-        // Área de texto do log (selecionável / copiável)
-        Expanded(
-          child: Container(
-            color: AppColors.logBg,
-            child: widget.send.log.isEmpty
-                ? const Center(
-                    child: Text(
-                      'O log aparecerá aqui durante o envio.',
-                      style: TextStyle(color: Color(0xFF5A7A5A), fontSize: 12),
+        // Muito estreito → colapsar automaticamente
+        if (w < 120 && widget.onCollapse != null) {
+          WidgetsBinding.instance.addPostFrameCallback((_) {
+            widget.onCollapse!();
+          });
+          return const SizedBox.shrink();
+        }
+
+        // Estreito (< 280px): só ícones, sem texto
+        final compact = w < 280;
+
+        return Column(
+          children: [
+            Container(
+              color: AppColors.background,
+              padding:
+                  EdgeInsets.fromLTRB(compact ? 4 : 14, 6, compact ? 4 : 14, 4),
+              child: compact
+                  ? Row(
+                      mainAxisAlignment: MainAxisAlignment.center,
+                      children: [
+                        if (widget.onCollapse != null)
+                          Tooltip(
+                            message: 'Esconder',
+                            child: InkWell(
+                              onTap: widget.onCollapse,
+                              borderRadius: BorderRadius.circular(4),
+                              child: const Padding(
+                                padding: EdgeInsets.all(4),
+                                child: Icon(Icons.visibility_off,
+                                    size: 16, color: Color(0xFF666666)),
+                              ),
+                            ),
+                          ),
+                        const SizedBox(width: 4),
+                        Tooltip(
+                          message: 'Limpar',
+                          child: InkWell(
+                            onTap: widget.send.clearLog,
+                            borderRadius: BorderRadius.circular(4),
+                            child: const Padding(
+                              padding: EdgeInsets.all(4),
+                              child: Icon(Icons.clear_all,
+                                  size: 16, color: Color(0xFF666666)),
+                            ),
+                          ),
+                        ),
+                      ],
+                    )
+                  : Row(
+                      children: [
+                        const Expanded(
+                          child: Text(
+                            'Log de execução:',
+                            style: TextStyle(
+                                fontWeight: FontWeight.bold, fontSize: 13),
+                            overflow: TextOverflow.ellipsis,
+                          ),
+                        ),
+                        const SizedBox(width: 4),
+                        if (widget.onCollapse != null)
+                          Padding(
+                            padding: const EdgeInsets.only(right: 6),
+                            child: AppButton(
+                              label: 'Esconder',
+                              icon: Icons.visibility_off,
+                              onPressed: widget.onCollapse,
+                              color: AppColors.neutralBtn,
+                              hoverColor: AppColors.neutralBtnHover,
+                              pressedColor: AppColors.neutralBtnPressed,
+                              height: 28,
+                              minWidth: 80,
+                              radius: 14,
+                              fontSize: 11,
+                            ),
+                          ),
+                        AppButton(
+                          label: 'Limpar',
+                          icon: Icons.clear_all,
+                          onPressed: widget.send.clearLog,
+                          color: AppColors.neutralBtn,
+                          hoverColor: AppColors.neutralBtnHover,
+                          pressedColor: AppColors.neutralBtnPressed,
+                          height: 28,
+                          minWidth: 80,
+                          radius: 14,
+                          fontSize: 11,
+                        ),
+                      ],
                     ),
-                  )
-                : SelectionArea(
-                    child: ListView.builder(
-                      controller: _scrollCtrl,
-                      padding: const EdgeInsets.all(10),
-                      itemCount: widget.send.log.length,
-                      itemBuilder: (_, i) {
-                        final entry = widget.send.log[i];
-                        return _LogLine(entry);
-                      },
-                    ),
-                  ),
-          ),
-        ),
-      ],
+            ),
+
+            // Área de texto do log (selecionável / copiável)
+            Expanded(
+              child: Container(
+                color: AppColors.logBg,
+                child: widget.send.log.isEmpty
+                    ? const Center(
+                        child: Text(
+                          'O log aparecerá aqui durante o envio.',
+                          style:
+                              TextStyle(color: Color(0xFF5A7A5A), fontSize: 12),
+                        ),
+                      )
+                    : SelectionArea(
+                        child: ListView.builder(
+                          controller: _scrollCtrl,
+                          padding: const EdgeInsets.all(10),
+                          itemCount: widget.send.log.length,
+                          itemBuilder: (_, i) {
+                            final entry = widget.send.log[i];
+                            return _LogLine(entry);
+                          },
+                        ),
+                      ),
+              ),
+            ),
+          ],
+        );
+      },
     );
   }
 

@@ -6,6 +6,7 @@ class AppConfig {
     this.intervalMax = 6,
     this.pageTimeout = 40,
     this.splitFraction = 0.55,
+    this.logCollapsed = false,
     this.savedAttachments = const ['', '', ''],
   });
 
@@ -14,6 +15,7 @@ class AppConfig {
   final int intervalMax;
   final int pageTimeout;
   final double splitFraction;
+  final bool logCollapsed;
   final List<String> savedAttachments;
 
   AppConfig copyWith({
@@ -22,6 +24,7 @@ class AppConfig {
     int? intervalMax,
     int? pageTimeout,
     double? splitFraction,
+    bool? logCollapsed,
     List<String>? savedAttachments,
   }) =>
       AppConfig(
@@ -30,6 +33,7 @@ class AppConfig {
         intervalMax: intervalMax ?? this.intervalMax,
         pageTimeout: pageTimeout ?? this.pageTimeout,
         splitFraction: splitFraction ?? this.splitFraction,
+        logCollapsed: logCollapsed ?? this.logCollapsed,
         savedAttachments: savedAttachments ?? this.savedAttachments,
       );
 
@@ -39,6 +43,7 @@ class AppConfig {
         intervalMax: (json['intervalo_max'] as num?)?.toInt() ?? 6,
         pageTimeout: (json['timeout_pagina'] as num?)?.toInt() ?? 40,
         splitFraction: (json['split_fraction'] as num?)?.toDouble() ?? 0.55,
+        logCollapsed: (json['log_collapsed'] as bool?) ?? false,
         savedAttachments: (json['saved_attachments'] as List<dynamic>?)
                 ?.map((e) => e.toString())
                 .toList() ??
@@ -51,6 +56,7 @@ class AppConfig {
         'intervalo_max': intervalMax,
         'timeout_pagina': pageTimeout,
         'split_fraction': splitFraction,
+        'log_collapsed': logCollapsed,
         'saved_attachments': savedAttachments,
       };
 }
