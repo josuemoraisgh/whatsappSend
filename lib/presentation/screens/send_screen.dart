@@ -10,8 +10,15 @@ import '../widgets/app_button.dart';
 
 /// Tela de envio com WebView embutido e log em tempo real.
 /// No Android oferece dois modos: automático (WebView) e manual (app nativo).
-class SendScreen extends StatelessWidget {
+class SendScreen extends StatefulWidget {
   const SendScreen({super.key});
+
+  @override
+  State<SendScreen> createState() => _SendScreenState();
+}
+
+class _SendScreenState extends State<SendScreen> {
+  bool _logCollapsed = false;
 
   @override
   Widget build(BuildContext context) {
@@ -37,16 +44,37 @@ class SendScreen extends StatelessWidget {
             final isWide = constraints.maxWidth >= 720;
 
             if (isWide && hasWebView) {
-              // Desktop: WebView e Log lado a lado com divisor arrastável
+              // Desktop: WebView e Log lado a lado
               return Column(
                 children: [
                   _ActionPanel(send),
                   const Divider(height: 1),
                   Expanded(
-                    child: _ResizableRow(
-                      left: _WebViewPanel(send, expanded: true),
-                      right: _LogPanel(send),
-                    ),
+                    child: _logCollapsed
+                        ? Row(
+                            children: [
+                              Expanded(
+                                  child: _WebViewPanel(send, expanded: true)),
+                              _CollapsedLogBar(
+                                send: send,
+                                onExpand: () =>
+                                    setState(() => _logCollapsed = false),
+                              ),
+                            ],
+                          )
+                        : _ResizableRow(
+                            left: _WebViewPanel(send, expanded: true),
+                            right: _LogPanel(
+                              send,
+                              onCollapse: () =>
+                                  setState(() => _logCollapsed = true),
+                            ),
+                            initialFraction:
+                                context.read<ConfigProvider>().splitFraction,
+                            onFractionChanged: (f) => context
+                                .read<ConfigProvider>()
+                                .updateSplitFraction(f),
+                          ),
                   ),
                 ],
               );
@@ -581,11 +609,61 @@ class _WebViewPanel extends StatelessWidget {
   }
 }
 
+// ── Barra colapsada do Log (vertical estreita) ───────────────────
+
+class _CollapsedLogBar extends StatelessWidget {
+  const _CollapsedLogBar({required this.send, required this.onExpand});
+  final SendProvider send;
+  final VoidCallback onExpand;
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      width: 32,
+      decoration: const BoxDecoration(
+        color: AppColors.background,
+        border: Border(left: BorderSide(color: Color(0xFFDDDDDD))),
+      ),
+      child: Column(
+        children: [
+          const SizedBox(height: 6),
+          Tooltip(
+            message: 'Mostrar Log',
+            child: InkWell(
+              onTap: onExpand,
+              borderRadius: BorderRadius.circular(4),
+              child: const Padding(
+                padding: EdgeInsets.all(4),
+                child:
+                    Icon(Icons.visibility, size: 16, color: Color(0xFF666666)),
+              ),
+            ),
+          ),
+          const SizedBox(height: 4),
+          Tooltip(
+            message: 'Limpar Log',
+            child: InkWell(
+              onTap: send.clearLog,
+              borderRadius: BorderRadius.circular(4),
+              child: const Padding(
+                padding: EdgeInsets.all(4),
+                child:
+                    Icon(Icons.clear_all, size: 16, color: Color(0xFF666666)),
+              ),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
 // ── Log ───────────────────────────────────────────────────────────
 
 class _LogPanel extends StatefulWidget {
-  const _LogPanel(this.send);
+  const _LogPanel(this.send, {this.onCollapse});
   final SendProvider send;
+  final VoidCallback? onCollapse;
 
   @override
   State<_LogPanel> createState() => _LogPanelState();
@@ -619,11 +697,30 @@ class _LogPanelState extends State<_LogPanel> {
           padding: const EdgeInsets.fromLTRB(14, 6, 14, 4),
           child: Row(
             children: [
-              const Text(
-                'Log de execução:',
-                style: TextStyle(fontWeight: FontWeight.bold, fontSize: 13),
+              const Expanded(
+                child: Text(
+                  'Log de execução:',
+                  style: TextStyle(fontWeight: FontWeight.bold, fontSize: 13),
+                  overflow: TextOverflow.ellipsis,
+                ),
               ),
-              const Spacer(),
+              const SizedBox(width: 4),
+              if (widget.onCollapse != null)
+                Padding(
+                  padding: const EdgeInsets.only(right: 6),
+                  child: AppButton(
+                    label: 'Esconder',
+                    icon: Icons.visibility_off,
+                    onPressed: widget.onCollapse,
+                    color: AppColors.neutralBtn,
+                    hoverColor: AppColors.neutralBtnHover,
+                    pressedColor: AppColors.neutralBtnPressed,
+                    height: 28,
+                    minWidth: 80,
+                    radius: 14,
+                    fontSize: 11,
+                  ),
+                ),
               AppButton(
                 label: 'Limpar',
                 icon: Icons.clear_all,
@@ -640,7 +737,7 @@ class _LogPanelState extends State<_LogPanel> {
           ),
         ),
 
-        // Área de texto do log
+        // Área de texto do log (selecionável / copiável)
         Expanded(
           child: Container(
             color: AppColors.logBg,
@@ -651,14 +748,16 @@ class _LogPanelState extends State<_LogPanel> {
                       style: TextStyle(color: Color(0xFF5A7A5A), fontSize: 12),
                     ),
                   )
-                : ListView.builder(
-                    controller: _scrollCtrl,
-                    padding: const EdgeInsets.all(10),
-                    itemCount: widget.send.log.length,
-                    itemBuilder: (_, i) {
-                      final entry = widget.send.log[i];
-                      return _LogLine(entry);
-                    },
+                : SelectionArea(
+                    child: ListView.builder(
+                      controller: _scrollCtrl,
+                      padding: const EdgeInsets.all(10),
+                      itemCount: widget.send.log.length,
+                      itemBuilder: (_, i) {
+                        final entry = widget.send.log[i];
+                        return _LogLine(entry);
+                      },
+                    ),
                   ),
           ),
         ),
@@ -676,16 +775,23 @@ class _LogPanelState extends State<_LogPanel> {
 // ── Painel redimensionável (divisor arrastável) ──────────────────
 
 class _ResizableRow extends StatefulWidget {
-  const _ResizableRow({required this.left, required this.right});
+  const _ResizableRow({
+    required this.left,
+    required this.right,
+    this.initialFraction = 0.55,
+    this.onFractionChanged,
+  });
   final Widget left;
   final Widget right;
+  final double initialFraction;
+  final ValueChanged<double>? onFractionChanged;
 
   @override
   State<_ResizableRow> createState() => _ResizableRowState();
 }
 
 class _ResizableRowState extends State<_ResizableRow> {
-  double _leftFraction = 0.55;
+  late double _leftFraction = widget.initialFraction;
   static const double _dividerWidth = 6.0;
 
   @override
@@ -693,7 +799,7 @@ class _ResizableRowState extends State<_ResizableRow> {
     return LayoutBuilder(
       builder: (context, constraints) {
         final total = constraints.maxWidth - _dividerWidth;
-        final leftW = (total * _leftFraction).clamp(120.0, total - 120.0);
+        final leftW = (total * _leftFraction).clamp(100.0, total - 40.0);
         final rightW = total - leftW;
         return Row(
           children: [
@@ -705,6 +811,9 @@ class _ResizableRowState extends State<_ResizableRow> {
                   _leftFraction =
                       ((leftW + d.delta.dx) / total).clamp(0.15, 0.85);
                 });
+              },
+              onHorizontalDragEnd: (_) {
+                widget.onFractionChanged?.call(_leftFraction);
               },
               child: MouseRegion(
                 cursor: SystemMouseCursors.resizeColumn,
@@ -747,8 +856,8 @@ class _LogLine extends StatelessWidget {
 
     return Padding(
       padding: const EdgeInsets.only(bottom: 2),
-      child: RichText(
-        text: TextSpan(
+      child: Text.rich(
+        TextSpan(
           style: const TextStyle(fontFamily: 'monospace', fontSize: 11),
           children: [
             TextSpan(

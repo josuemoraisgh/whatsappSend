@@ -5,7 +5,14 @@ import '../../domain/repositories/config_repository.dart';
 
 /// Gerencia configurações da aplicação e lista de arquivos para envio.
 final class ConfigProvider extends ChangeNotifier {
-  ConfigProvider(this._repo, AppConfig initial) : _config = initial;
+  ConfigProvider(this._repo, AppConfig initial) : _config = initial {
+    // Restaura anexos salvos
+    final saved = initial.savedAttachments;
+    _attachments = List.generate(
+      3,
+      (i) => i < saved.length ? saved[i] : '',
+    );
+  }
 
   final ConfigRepository _repo;
   AppConfig _config;
@@ -13,7 +20,7 @@ final class ConfigProvider extends ChangeNotifier {
   AppConfig get config => _config;
 
   // Até 3 arquivos para enviar junto com a mensagem
-  final List<String> _attachments = ['', '', ''];
+  late final List<String> _attachments;
   List<String> get attachments =>
       _attachments.where((a) => a.isNotEmpty).toList();
 
@@ -21,7 +28,12 @@ final class ConfigProvider extends ChangeNotifier {
 
   void setAttachment(int index, String path) {
     _attachments[index] = path;
+    _saveAttachments();
     notifyListeners();
+  }
+
+  void _saveAttachments() {
+    update(_config.copyWith(savedAttachments: List.of(_attachments)));
   }
 
   Future<void> update(AppConfig config) async {
@@ -32,4 +44,10 @@ final class ConfigProvider extends ChangeNotifier {
 
   Future<void> updateDefaultMessage(String message) =>
       update(_config.copyWith(defaultMessage: message));
+
+  /// Proporção WebView / Log
+  double get splitFraction => _config.splitFraction;
+
+  Future<void> updateSplitFraction(double fraction) =>
+      update(_config.copyWith(splitFraction: fraction));
 }
